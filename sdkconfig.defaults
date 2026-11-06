@@ -26,9 +26,9 @@ CONFIG_LV_FONT_MONTSERRAT_14=y
 CONFIG_LV_FONT_MONTSERRAT_20=y
 CONFIG_LV_TXT_ENC_UTF8=y
 CONFIG_LV_USE_FONT_PLACEHOLDER=y
-# LVGL 内置 malloc 池大小(KB)。它是独立静态区、不与系统堆共享,配大了会白白占用 RAM。
-# 本 demo UI 简单,24KB 足够;若自建复杂界面出现绘制卡死/看门狗,调大此值。
-CONFIG_LV_MEM_SIZE_KILOBYTES=24
+# Settings and the photo reveal require differently sized allocations over time.
+# Use ESP-IDF's internal heap instead of fragmenting a separate fixed LVGL pool.
+CONFIG_LV_USE_CLIB_MALLOC=y
 
 # --- 系统 ---
 CONFIG_FREERTOS_HZ=1000

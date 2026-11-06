@@ -452,7 +452,7 @@ static void paint_settings(void) {
             hint = "长按 OK 关闭热点";
             if (net.setup) {
                 snprintf(one, sizeof one, "热点名  %s", net.setup_ssid);
-                snprintf(two, sizeof two, "热点密码  %s", net.setup_key);
+                strcpy(two, "无需密码 · 直接连接");
             } else if (net.note == NET_NOTE_SETUP_FAILED) strcpy(one, "热点启动失败");
             else strcpy(one, "正在启动热点…");
             break;

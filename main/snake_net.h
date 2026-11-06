@@ -28,7 +28,6 @@ typedef struct {
     bool setup;
     bool setup_joined;
     char setup_ssid[33];
-    char setup_key[9];
     char ssid[33];
     char lan_ip[16];
     uint16_t lan_port;

@@ -271,7 +271,6 @@ static void stop_setup(void) {
     view.setup = false;
     view.setup_joined = false;
     view.setup_ssid[0] = '\0';
-    explicit_bzero(view.setup_key, sizeof view.setup_key);
     reconnect_at = now_ms();
     publish();
 }
@@ -285,13 +284,11 @@ static void start_setup(void) {
     }
     wifi_config_t ap = {0};
     unsigned suffix = (unsigned)(esp_random() & 0xffffu);
-    snprintf(view.setup_ssid, sizeof view.setup_ssid, "充电蛇-%04X", suffix);
-    snprintf(view.setup_key, sizeof view.setup_key, "%08lu", (unsigned long)(esp_random() % 100000000u));
+    snprintf(view.setup_ssid, sizeof view.setup_ssid, "CandyPin-配网-%04X", suffix);
     ap.ap.ssid_len = strlen(view.setup_ssid);
     memcpy(ap.ap.ssid, view.setup_ssid, ap.ap.ssid_len);
-    memcpy(ap.ap.password, view.setup_key, sizeof view.setup_key);
     ap.ap.channel = 1;
-    ap.ap.authmode = WIFI_AUTH_WPA2_PSK;
+    ap.ap.authmode = WIFI_AUTH_OPEN;
     ap.ap.max_connection = 1;
     (void)esp_wifi_stop();
     xEventGroupClearBits(wifi_events, HAS_IP);
@@ -309,7 +306,6 @@ static void start_setup(void) {
         (void)esp_wifi_start();
         view.note = NET_NOTE_SETUP_FAILED;
         view.setup_ssid[0] = '\0';
-        explicit_bzero(view.setup_key, sizeof view.setup_key);
         publish();
         return;
     }

@@ -2,20 +2,20 @@
 
 把 FoloToy AI Passport 变成小电拼的桌面充电仪表。240×320 屏幕显示五个端口的实时总功率和各口功率，中间用像素画面表现负载和功率分配。可以停在功率卡看动画，也可以用机身三键玩小游戏或展示自己的像素相册。
 
-这是面向 **ESP32-C3、8 MB Flash 的 AI Passport** 的独立实验固件，版本为 **v0.5.1**，固件 ID 为 `candypin`。充电数据来自兼容的小电拼局域网接口或 MCP 服务。固件用这些接口读取数据，不调整充电器的输出。
+这是面向 **ESP32-C3、8 MB Flash 的 AI Passport** 的独立实验固件，版本为 **v0.5.2**，固件 ID 为 `candypin`。充电数据来自兼容的小电拼局域网接口或 MCP 服务。固件用这些接口读取数据，不调整充电器的输出。
 
 ## 第一次安装 CandyPin
 
 用电脑上的 Chrome 和一根支持数据传输的 USB-C 线。固件适用于 **ESP32-C3、8 MB Flash 的 FoloToy AI Passport**。
 
-1. 下载 [candypin-full.bin](https://github.com/weixunkkkkk/passport-candypin/releases/download/v0.5.1/candypin-full.bin)，保留 `.bin` 文件。
+1. 下载 [candypin-full.bin](https://github.com/weixunkkkkk/passport-candypin/releases/download/v0.5.2/candypin-full.bin)，保留 `.bin` 文件。
 2. 打开 [FoloToy 官方网页刷机工具](https://ai-passport.folotoy.cn/tools/web-flasher/)，进入「安装本地固件」。
 3. 用 USB-C 数据线连接 Passport，选择下载的 `candypin-full.bin`，按网页提示选择串口并开始安装。
 4. 等网页提示安装完成并让设备重启，再拔线。首次启动后按设备提示配网。
 
 首次安装使用合并镜像，会替换设备上的固件，并可能清除原有配网和相册。刷写期间保持 USB 连接。找不到串口时，先换一根确定可传数据的线，再关闭串口监视器并重试。更新已有 CandyPin 且要保留设置时，见下方「从源码构建」中的应用分区更新方法。
 
-[版本下载与校验值](https://github.com/weixunkkkkk/passport-candypin/releases/tag/v0.5.1)
+[版本下载与校验值](https://github.com/weixunkkkkk/passport-candypin/releases/tag/v0.5.2)
 
 ![五款待机画面，使用模拟功率](docs/images/idle-demo.gif)
 
@@ -35,7 +35,7 @@
 | 结算 | 短按 OK 重玩，长按 OK 返回 |
 | DIY 卡 | 短按 OK 开上传热点，长按上键在已保存的画位间切换 |
 
-第一次配置可用机身的 **设置 → 联网与读数 → 热点设置**，或直接扫描 Wi-Fi。手机连上屏幕显示的临时热点后，打开 [配网页](http://192.168.4.1)。选择同网的 2.4 GHz Wi-Fi，按需填入自己的 HTTPS MCP 地址。局域网模式还需要在机身设置中填入小电拼的局域网 IPv4 地址。
+第一次配置可用机身的 **设置 → 联网与读数 → 热点设置**，或直接扫描 Wi-Fi。手机直接连接屏幕显示的 `CandyPin-配网-XXXX` 热点，无需输入热点密码。打开 [配网页](http://192.168.4.1)，选择同网的 2.4 GHz Wi-Fi。若该 Wi-Fi 已加密，输入该网络的密码。按需填入自己的 HTTPS MCP 地址。局域网模式还需要在机身设置中填入小电拼的局域网 IPv4 地址。
 
 | 数据来源 | 要求 |
 | --- | --- |
@@ -43,7 +43,7 @@
 | MCP | HTTPS MCP 服务提供兼容的 `get_port_details` 工具 |
 | 自动 | 优先使用已配置的局域网。局域网读取失败时尝试已配置的 MCP，并周期性探测局域网恢复 |
 
-上传照片时，在 DIY 卡按 OK 并连上热点，再打开 [像素画上传页](http://192.168.4.1/diy)。保存后在机身长按 OK 关闭热点并回到卡片。原照片在手机浏览器本地处理，设备接收并保存生成的像素数据。同一个画位保存时会覆盖旧图。
+上传照片时，在 DIY 卡按 OK 并连接同一个免密热点，再打开 [像素画上传页](http://192.168.4.1/diy)。保存后在机身长按 OK 关闭热点并回到卡片。原照片在手机浏览器本地处理，设备接收并保存生成的像素数据。同一个画位保存时会覆盖旧图。
 
 <img src="docs/images/diy-demo.gif" alt="示例像素画逐块拼接" width="240">
 
