@@ -182,5 +182,5 @@ void snake_usb_start(void) {
     if (usb_serial_jtag_driver_install(&config) != ESP_OK) return;
     usb_serial_jtag_vfs_use_driver();
     if (xTaskCreate(worker, "snake-usb", 3400, NULL, 3, NULL) != pdPASS)
-        ESP_LOGW("power-snake", "USB commands unavailable");
+        ESP_LOGW("candypin", "USB commands unavailable");
 }

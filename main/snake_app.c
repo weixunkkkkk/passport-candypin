@@ -402,7 +402,7 @@ static void category_status(char buf[80], unsigned index) {
 }
 
 static void paint_settings(void) {
-    const char *heading = "设置", *hint = "上下选 · OK 确认 · 长按 OK 返回";
+    const char *heading = "CandyPin 设置", *hint = "上下选 · OK 确认 · 长按 OK 返回";
     char one[80] = "", two[80] = "", name[40];
     switch (page) {
         case MENU:
@@ -746,7 +746,7 @@ static void set_demo(bool enabled, uint32_t now) {
     brick_relay = (brick_relay_t){0};
     snake_reset(&model);
     show_page(CARD);
-    if (enabled) ESP_LOGI("power-snake", "Demo selected");
+    if (enabled) ESP_LOGI("candypin", "Demo selected");
 }
 
 static void set_relay_demo(uint32_t now) {
@@ -844,7 +844,7 @@ static void display_sleep(bool dark, uint32_t now) {
     }
     esp_err_t result = bsp_display_panel_sleep(dark);
     if (result != ESP_OK) {
-        ESP_LOGW("power-snake", "LCD power transition failed: %s", esp_err_to_name(result));
+        ESP_LOGW("candypin", "LCD power transition failed: %s", esp_err_to_name(result));
         if (!dark) return;
     }
     screen_dark = dark;
@@ -1209,7 +1209,7 @@ void app_main(void) {
     last_input = now_ms();
     ESP_ERROR_CHECK(bsp_display_init());
     if (!bsp_lvgl_init()) {
-        ESP_LOGE("power-snake", "Display initialization failed");
+        ESP_LOGE("candypin", "Display initialization failed");
         return;
     }
     inputs = xQueueCreate(12, sizeof(input_t));
@@ -1222,12 +1222,12 @@ void app_main(void) {
         bsp_lvgl_unlock();
     } else return;
     bsp_display_backlight(prefs.brightness);
-    if (bsp_button_init(button, NULL) != ESP_OK) ESP_LOGE("power-snake", "Button initialization failed");
+    if (bsp_button_init(button, NULL) != ESP_OK) ESP_LOGE("candypin", "Button initialization failed");
     if (nvs == ESP_OK) snake_album_init();
-    if (nvs == ESP_OK && !snake_net_start()) ESP_LOGE("power-snake", "Network task could not start");
-    if (nvs != ESP_OK) ESP_LOGE("power-snake", "Settings unavailable: %s", esp_err_to_name(nvs));
+    if (nvs == ESP_OK && !snake_net_start()) ESP_LOGE("candypin", "Network task could not start");
+    if (nvs != ESP_OK) ESP_LOGE("candypin", "Settings unavailable: %s", esp_err_to_name(nvs));
     snake_usb_start();
-    ESP_LOGI("power-snake", "240x320 card ready, heap=%u", (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
+    ESP_LOGI("candypin", "240x320 card ready, heap=%u", (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
     if (bsp_battery_init() != ESP_OK) return;
     for (;;) {
         __atomic_store_n(&battery_pct, bsp_battery_soc(), __ATOMIC_RELAXED);

@@ -1,8 +1,8 @@
-# Passport Power Arcade · 充电蛇
+# CandyPin · 充电蛇
 
 把 FoloToy AI Passport 变成小电拼的桌面充电仪表。240×320 屏幕显示五个端口的实时总功率和各口功率，中间用像素画面表现负载和功率分配。可以停在功率卡看动画，也可以用机身三键玩小游戏或展示自己的像素相册。
 
-这是面向 **ESP32-C3、8 MB Flash 的 AI Passport** 的独立实验固件，版本为 **v0.5.0**。充电数据来自兼容的小电拼局域网接口或 MCP 服务。固件用这些接口读取数据，不调整充电器的输出。
+这是面向 **ESP32-C3、8 MB Flash 的 AI Passport** 的独立实验固件，版本为 **v0.5.1**，固件 ID 为 `candypin`。充电数据来自兼容的小电拼局域网接口或 MCP 服务。固件用这些接口读取数据，不调整充电器的输出。
 
 ![五款待机画面，使用模拟功率](docs/images/idle-demo.gif)
 
@@ -41,13 +41,13 @@
 ```sh
 ./tools/test-host.sh
 idf.py build
-idf.py merge-bin -o "$PWD/build/FoloToy-AI-Passport-full.bin"
+idf.py merge-bin -o "$PWD/build/candypin-full.bin"
 python3 tools/verify_firmware.py build
 ```
 
 项目默认配置为 ESP32-C3、8 MB Flash。首次刷写请先核对硬件和分区布局，再用 `idf.py -p <串口> flash`。更新已安装本项目的设备时，确认分区表兼容后可用 `idf.py -p <串口> app-flash` 保留 NVS 数据。整片合并镜像从 `0x0` 写入，可能覆盖配网和相册。
 
-当前发布为源码版本。构建、主机测试和合并镜像校验已通过。v0.5.0 的真机热点上传、重启后相册读取和息屏功耗仍待验证。预览中的功率和图片是演示数据。
+当前发布为源码版本。构建、主机测试和合并镜像校验已通过。当前版本的真机热点上传、重启后相册读取和息屏功耗仍待验证。预览中的功率和图片是演示数据。
 
 ## 来源与许可
 

@@ -162,7 +162,7 @@ static bool initialize_mcp(const char *url) {
     static const char init[] =
         "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":"
         "{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},"
-        "\"clientInfo\":{\"name\":\"passport-power-snake\",\"version\":\"0.1.0\"}}}";
+        "\"clientInfo\":{\"name\":\"candypin\",\"version\":\"0.5.1-CandyPin\"}}}";
     if (post(init) != 200) return false;
     cJSON *json = rpc_result(1);
     const cJSON *result = cJSON_GetObjectItemCaseSensitive(json, "result");

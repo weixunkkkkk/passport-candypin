@@ -11,11 +11,21 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-REQUIRED_IMAGES = (
-    "bootloader/bootloader.bin",
-    "partition_table/partition-table.bin",
-    "FoloToy-AI-Passport.bin",
-)
+LEGACY_APP_ID = "FoloToy-AI-Passport"
+APP_IMAGES = ("candypin.bin", f"{LEGACY_APP_ID}.bin")
+SYSTEM_IMAGES = ("bootloader/bootloader.bin", "partition_table/partition-table.bin")
+
+
+def required_flash_images(image_offsets: dict[str, int]) -> tuple[str, ...]:
+    apps = [name for name in APP_IMAGES if name in image_offsets]
+    missing = [name for name in SYSTEM_IMAGES if name not in image_offsets]
+    if not apps:
+        missing.append("application image")
+    if missing:
+        raise ValueError(f"flash_args is missing required images: {missing}")
+    if len(apps) != 1:
+        raise ValueError("flash_args contains more than one supported application image")
+    return (*SYSTEM_IMAGES, apps[0])
 
 FLASH_SIZE = 8 * 1024 * 1024
 PARTITION_TABLE_SIZE = 0xC00
@@ -126,7 +136,8 @@ def verify_flash_images(
 
 
 def verify_firmware_layout(
-    merged: bytes, build_dir: Path, partition_table_offset: int, app_offset: int
+    merged: bytes, build_dir: Path, partition_table_offset: int, app_offset: int,
+    app_image: str = f"{LEGACY_APP_ID}.bin",
 ) -> list[Partition]:
     """Validate the configured partition table and its application image."""
     table = merged[
@@ -155,7 +166,7 @@ def verify_firmware_layout(
             f"application offset 0x{app_offset:x} must match exactly one app partition"
         )
     app_partition = matching_apps[0]
-    app_path = build_dir / "FoloToy-AI-Passport.bin"
+    app_path = build_dir / app_image
     app_size = app_path.stat().st_size
     if app_size > app_partition.size:
         raise ValueError(
@@ -175,11 +186,11 @@ def verify_firmware_layout(
 
 def verify_extra_image_partitions(
     image_offsets: dict[str, int], image_sizes: dict[str, int],
-    partitions: list[Partition],
+    partitions: list[Partition], required_images: tuple[str, ...],
 ) -> None:
     """Allow custom images anywhere within one partition, never across its end."""
     for name, offset in image_offsets.items():
-        if name in REQUIRED_IMAGES:
+        if name in required_images:
             continue
         end = offset + image_sizes[name]
         if not any(part.offset <= offset and end <= part.end for part in partitions):
@@ -188,21 +199,16 @@ def verify_extra_image_partitions(
 
 def main() -> int:
     build_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "build").resolve()
-    merged_path = build_dir / "FoloToy-AI-Passport-full.bin"
     flash_args_path = build_dir / "flash_args"
-
-    if not merged_path.is_file() or not flash_args_path.is_file():
-        print("ERROR: merged firmware or flash_args is missing", file=sys.stderr)
-        return 1
 
     try:
         flash_args = flash_args_path.read_text(encoding="utf-8")
         if "--flash_size 8MB" not in flash_args:
             raise ValueError("flash_args does not select the required 8 MB flash size")
         image_offsets = parse_flash_args(flash_args)
-        missing = [name for name in REQUIRED_IMAGES if name not in image_offsets]
-        if missing:
-            raise ValueError(f"flash_args is missing required images: {missing}")
+        required_images = required_flash_images(image_offsets)
+        app_image = required_images[-1]
+        merged_path = build_dir / f"{Path(app_image).stem}-full.bin"
         if image_offsets["bootloader/bootloader.bin"] != 0:
             raise ValueError("the merged bootloader must start at 0x0")
         if merged_path.stat().st_size > FLASH_SIZE:
@@ -213,9 +219,10 @@ def main() -> int:
             merged,
             build_dir,
             image_offsets["partition_table/partition-table.bin"],
-            image_offsets["FoloToy-AI-Passport.bin"],
+            image_offsets[app_image],
+            app_image,
         )
-        verify_extra_image_partitions(image_offsets, image_sizes, partitions)
+        verify_extra_image_partitions(image_offsets, image_sizes, partitions, required_images)
     except (OSError, UnicodeDecodeError, ValueError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1

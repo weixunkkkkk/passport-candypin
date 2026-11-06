@@ -77,14 +77,14 @@ static void hex_name(char out[65], const char *text) {
 
 static const char page_head[] =
     "<!doctype html><html lang=zh-CN><meta charset=utf-8><meta name=viewport "
-    "content=\"width=device-width, initial-scale=1\"><title>充电蛇连接设置</title>"
+    "content=\"width=device-width, initial-scale=1\"><title>CandyPin 连接设置</title>"
     "<style>body{background:#191612;color:#fff0d7;font:16px system-ui,sans-serif;max-width:26rem;"
     "margin:2rem auto;padding:0 1.1rem}h1{font-size:1.55rem}p{color:#d9c4a8;line-height:1.5}"
     "label{display:block;margin:1rem 0 .3rem}input,select,button{box-sizing:border-box;width:100%;"
     "font:inherit;padding:.7rem;border:1px solid #675139;border-radius:.45rem;background:#2d251b;"
     "color:#fff0d7}button{margin-top:.9rem;background:#ffc444;color:#281b0d;border:0}"
     "form+form button{background:#3a2f21;color:#fff0d7}.muted{font-size:.88rem}</style>"
-    "<h1>充电蛇连接设置</h1><p><a style=\"color:#ffc444\" href=/diy>DIY 像素画上传</a></p>";
+    "<h1>CandyPin 连接设置</h1><p><a style=\"color:#ffc444\" href=/diy>DIY 像素画上传</a></p>";
 
 static esp_err_t show(httpd_req_t *req) {
     if (!local_request(req)) return message(req, "403 Forbidden", "请连接 Passport 的配网热点。");
