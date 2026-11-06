@@ -1,0 +1,15 @@
+/build/
+/managed_components/
+/sdkconfig
+/sdkconfig.old
+/.env
+/.env.*
+/.vscode/
+/.idea/
+.DS_Store
+*.log
+*.bin
+*.elf
+*.map
+*.pem
+*.key
