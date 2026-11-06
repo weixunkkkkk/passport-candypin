@@ -4,6 +4,19 @@
 
 这是面向 **ESP32-C3、8 MB Flash 的 AI Passport** 的独立实验固件，版本为 **v0.5.1**，固件 ID 为 `candypin`。充电数据来自兼容的小电拼局域网接口或 MCP 服务。固件用这些接口读取数据，不调整充电器的输出。
 
+## 第一次安装 CandyPin
+
+用电脑上的 Chrome 和一根支持数据传输的 USB-C 线。固件适用于 **ESP32-C3、8 MB Flash 的 FoloToy AI Passport**。
+
+1. 下载 [candypin-full.bin](https://github.com/weixunkkkkk/passport-candypin/releases/download/v0.5.1/candypin-full.bin)，保留 `.bin` 文件。
+2. 打开 [FoloToy 官方网页刷机工具](https://ai-passport.folotoy.cn/tools/web-flasher/)，进入「安装本地固件」。
+3. 用 USB-C 数据线连接 Passport，选择下载的 `candypin-full.bin`，按网页提示选择串口并开始安装。
+4. 等网页提示安装完成并让设备重启，再拔线。首次启动后按设备提示配网。
+
+首次安装使用合并镜像，会替换设备上的固件，并可能清除原有配网和相册。刷写期间保持 USB 连接。找不到串口时，先换一根确定可传数据的线，再关闭串口监视器并重试。更新已有 CandyPin 且要保留设置时，见下方「从源码构建」中的应用分区更新方法。
+
+[版本下载与校验值](https://github.com/weixunkkkkk/passport-candypin/releases/tag/v0.5.1)
+
 ![五款待机画面，使用模拟功率](docs/images/idle-demo.gif)
 
 ## 能做什么
@@ -47,7 +60,7 @@ python3 tools/verify_firmware.py build
 
 项目默认配置为 ESP32-C3、8 MB Flash。首次刷写请先核对硬件和分区布局，再用 `idf.py -p <串口> flash`。更新已安装本项目的设备时，确认分区表兼容后可用 `idf.py -p <串口> app-flash` 保留 NVS 数据。整片合并镜像从 `0x0` 写入，可能覆盖配网和相册。
 
-当前发布为源码版本。构建、主机测试和合并镜像校验已通过。当前版本的真机热点上传、重启后相册读取和息屏功耗仍待验证。预览中的功率和图片是演示数据。
+GitHub Releases 提供网页刷机用的合并镜像。构建、主机测试和合并镜像校验已通过。当前版本的真机热点上传、重启后相册读取和息屏功耗仍待验证。预览中的功率和图片是演示数据。
 
 ## 来源与许可
 
