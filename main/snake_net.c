@@ -14,14 +14,21 @@
 #include "freertos/task.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
+#include "mdns.h"
 #include "nvs.h"
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 #define NVS_SPACE "power_snake"
 #define HAS_IP BIT0
 #define PROBE_INTERVAL_MS 5500u
+#define DISCOVERY_RETRY_MS 7000u
+#define DISCOVERY_QUERY_MS 1200u
+#define DISCOVERY_RESULTS 16u
+
+typedef struct { char address[16]; uint16_t port; } target_t;
 
 static const char *TAG = "snake-net";
 static QueueHandle_t commands, view_queue, sample_queue;
@@ -32,7 +39,11 @@ static char mcp_url[SNAKE_MCP_URL_MAX];
 static bool paused;
 static uint32_t poll_at, probe_at, reconnect_at;
 static uint32_t cloud_at;
+static uint32_t discovery_at;
+static target_t discovered_lan;
+static bool mdns_ready;
 static uint32_t setup_deadline;
+static esp_netif_t *station_netif;
 static esp_netif_t *setup_netif;
 static bool sntp_started;
 static uint16_t disconnect_reason;
@@ -75,8 +86,6 @@ static bool read_blob(nvs_handle_t handle, const char *key, void *out, size_t si
     return nvs_get_blob(handle, key, out, &actual) == ESP_OK && actual == size;
 }
 
-typedef struct { char address[16]; uint16_t port; } target_t;
-
 static void read_settings(void) {
     view.lan_port = 80;
     view.prefs = snake_prefs_default();
@@ -112,8 +121,9 @@ static void event(void *arg, esp_event_base_t base, int32_t id, void *data) {
 
 static bool radio_init(void) {
     wifi_init_config_t defaults = WIFI_INIT_CONFIG_DEFAULT();
-    if (esp_netif_init() != ESP_OK || esp_event_loop_create_default() != ESP_OK ||
-        !esp_netif_create_default_wifi_sta() || esp_wifi_init(&defaults) != ESP_OK) return false;
+    if (esp_netif_init() != ESP_OK || esp_event_loop_create_default() != ESP_OK) return false;
+    station_netif = esp_netif_create_default_wifi_sta();
+    if (!station_netif || esp_wifi_init(&defaults) != ESP_OK) return false;
     if (esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, event, NULL) != ESP_OK ||
         esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, event, NULL) != ESP_OK) return false;
     setup_netif = esp_netif_create_default_wifi_ap();
@@ -142,6 +152,7 @@ static void online_status(bool online) {
         if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) memcpy(view.ssid, ap.ssid, sizeof view.ssid);
         view.ssid[32] = '\0';
         poll_at = probe_at = cloud_at = now_ms();
+        discovery_at = poll_at;
         ESP_LOGI(TAG, "Wi-Fi has an IP");
         if (!sntp_started) {
             esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
@@ -150,6 +161,7 @@ static void online_status(bool online) {
     } else {
         view.ssid[0] = '\0';
         view.source = SNAKE_NONE;
+        discovered_lan = (target_t){0};
         snake_close_mcp();
     }
     publish();
@@ -297,7 +309,7 @@ static void start_setup(void) {
     bool ready = esp_wifi_set_mode(WIFI_MODE_APSTA) == ESP_OK &&
         esp_wifi_set_config(WIFI_IF_AP, &ap) == ESP_OK && esp_wifi_start() == ESP_OK &&
         esp_netif_get_ip_info(setup_netif, &ip) == ESP_OK && ntohl(ip.ip.addr) == 0xc0a80401u &&
-        snake_portal_start();
+        snake_portal_start(setup_netif);
     explicit_bzero(&ap, sizeof ap);
     if (!ready) {
         snake_portal_stop();
@@ -342,6 +354,8 @@ static void command(snake_net_cmd_t *cmd, bool radio) {
                 if (save_blob("lan", &target, sizeof target)) {
                     memcpy(view.lan_ip, target.address, sizeof view.lan_ip);
                     view.lan_port = target.port;
+                    discovered_lan = (target_t){0};
+                    discovery_at = now_ms();
                 } else view.note = NET_NOTE_SAVE_FAILED;
             }
             break;
@@ -383,20 +397,80 @@ static void command(snake_net_cmd_t *cmd, bool radio) {
     publish();
 }
 
+// CP-02S advertises a cp02s-* HTTP service with its port and IPv4 address.
+// A manually saved target takes precedence. Never choose between two chargers.
+static target_t discover_lan(void) {
+    if (!mdns_ready) {
+        mdns_ready = mdns_init() == ESP_OK;
+        if (!mdns_ready) return (target_t){0};
+    }
+    mdns_result_t *results = NULL;
+    if (mdns_query_ptr("_http", "_tcp", DISCOVERY_QUERY_MS, DISCOVERY_RESULTS, &results) != ESP_OK)
+        return (target_t){0};
+
+    target_t target = {0};
+    const char *instance = NULL;
+    unsigned count = 0;
+    for (const mdns_result_t *r = results; r; r = r->next) {
+        if (++count >= DISCOVERY_RESULTS) {
+            target = (target_t){0};
+            break;
+        }
+        if (r->esp_netif != station_netif || !r->instance_name ||
+            strncasecmp(r->instance_name, "cp02s-", 6) || !r->instance_name[6]) continue;
+        if (instance && strcasecmp(instance, r->instance_name)) {
+            target = (target_t){0};
+            break;
+        }
+        instance = r->instance_name;
+        if (target.port || !r->port) continue;
+        for (const mdns_ip_addr_t *a = r->addr; a; a = a->next) {
+            char ipv4[sizeof target.address];
+            if (a->addr.type == ESP_IPADDR_TYPE_V4 &&
+                inet_ntop(AF_INET, &a->addr.u_addr.ip4.addr, ipv4, sizeof ipv4) &&
+                snake_lan_ip_valid(ipv4)) {
+                strcpy(target.address, ipv4);
+                target.port = r->port;
+                break;
+            }
+        }
+    }
+    mdns_query_results_free(results);
+    return target;
+}
+
+static bool read_lan_sample(snake_sample_t *sample) {
+    if (view.lan_ip[0]) return snake_read_lan(view.lan_ip, view.lan_port, sample);
+    bool first_read = !discovered_lan.port;
+    if (first_read) {
+        discovered_lan = discover_lan();
+        discovery_at = now_ms() + DISCOVERY_RETRY_MS;
+        if (!discovered_lan.port) return false;
+    }
+    if (!snake_read_lan(discovered_lan.address, discovered_lan.port, sample)) {
+        discovered_lan = (target_t){0};
+        if (!first_read) discovery_at = now_ms();
+        return false;
+    }
+    if (first_read) ESP_LOGI(TAG, "XDP auto-discovered and telemetry verified");
+    return true;
+}
+
 static void poll_telemetry(void) {
     uint32_t now = now_ms();
     uint32_t lan_ms = (uint32_t)view.prefs.lan_seconds * 1000u;
     uint32_t mcp_ms = (uint32_t)view.prefs.mcp_seconds * 1000u;
     bool scheduled = due(now, poll_at);
+    bool lan_due = view.lan_ip[0] || discovered_lan.port || due(now, discovery_at);
     bool probing = view.mode == MODE_AUTO && view.source == SNAKE_MCP &&
-        view.lan_ip[0] && due(now, probe_at);
+        lan_due && due(now, probe_at);
     if (!scheduled && !probing) return;
     snake_sample_t sample;
     bool prefer_lan = view.mode == MODE_LAN || (view.mode == MODE_AUTO &&
         (view.source != SNAKE_MCP || due(now, probe_at)));
     bool ok = false;
-    if (prefer_lan && view.lan_ip[0]) {
-        ok = snake_read_lan(view.lan_ip, view.lan_port, &sample);
+    if (prefer_lan && lan_due) {
+        ok = read_lan_sample(&sample);
         probe_at = now_ms() + (lan_ms > PROBE_INTERVAL_MS ? lan_ms : PROBE_INTERVAL_MS);
     }
     if (!ok && scheduled && view.mode != MODE_LAN && view.mcp_set &&

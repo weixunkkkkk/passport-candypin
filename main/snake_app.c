@@ -23,6 +23,8 @@ LV_FONT_DECLARE(snake_font);
 
 typedef enum { CARD, MENU, MODES, SCAN, PASSWORD, CHARACTERS, ADDRESS, JOINING, HOTSPOT,
                STYLES, PREFS, ADJUST, CONNECTIONS, SAMPLING, DEMOS } page_t;
+enum { ADDRESS_AUTO, ADDRESS_ZERO, ADDRESS_DOT = ADDRESS_ZERO + 10,
+       ADDRESS_DELETE, ADDRESS_CLEAR, ADDRESS_SAVE, ADDRESS_BACK, ADDRESS_COUNT };
 static const uint32_t INK = 0x191612, PAPER = 0xfff0d7, QUIET = 0xb7a58e;
 static const uint32_t ACCENT = 0xffc444, RULE = 0x3d3226;
 static const char *const mode_names[] = {"自动", "局域网", "MCP"};
@@ -317,7 +319,7 @@ static unsigned options(void) {
         case SCAN: return net.scanning ? 0 : net.ap_count + 1;
         case PASSWORD: return sizeof group_names / sizeof group_names[0];
         case CHARACTERS: return strlen(alphabets[group]);
-        case ADDRESS: return 15;
+        case ADDRESS: return ADDRESS_COUNT;
         case HOTSPOT: return 3;
         case STYLES: return STYLE_COUNT;
         case PREFS: case SAMPLING: return 2;
@@ -344,6 +346,7 @@ static void option_text(char buf[80], unsigned i) {
         case MENU: strcpy(buf, category_names[i]); break;
         case CONNECTIONS:
             if (i == 0) snprintf(buf, 80, "数据来源  %s", mode_names[net.mode]);
+            else if (i == 3) snprintf(buf, 80, "%s  %s", connection_names[i], net.lan_ip[0] ? "手动" : "自动");
             else if (i < sizeof connection_names / sizeof connection_names[0]) strcpy(buf, connection_names[i]);
             else strcpy(buf, net.wifi == WIFI_READY ? "断开 Wi-Fi" : "重连 Wi-Fi");
             break;
@@ -367,8 +370,10 @@ static void option_text(char buf[80], unsigned i) {
             else snprintf(buf, 80, "%c", alphabets[group][i]);
             break;
         case ADDRESS:
-            if (i <= 10) snprintf(buf, 80, "%c", i == 10 ? '.' : '0' + (int)i);
-            else snprintf(buf, 80, "%s", i == 11 ? "删除一位" : i == 12 ? "清空" : i == 13 ? "保存" : "返回");
+            if (i == ADDRESS_AUTO) strcpy(buf, "自动查找小电拼");
+            else if (i <= ADDRESS_DOT) snprintf(buf, 80, "%c", i == ADDRESS_DOT ? '.' : '0' + (int)i - ADDRESS_ZERO);
+            else strcpy(buf, i == ADDRESS_DELETE ? "删除一位" : i == ADDRESS_CLEAR ? "清空" :
+                              i == ADDRESS_SAVE ? "保存地址" : "返回");
             break;
         case HOTSPOT:
             if (i == 0) strcpy(buf, "手机连接上方热点");
@@ -438,9 +443,9 @@ static void paint_settings(void) {
             snprintf(two, sizeof two, "已输入 %u 位", (unsigned)strlen(secret));
             break;
         case ADDRESS:
-            heading = "修改 CP-IP";
-            snprintf(one, sizeof one, "%s", address[0] ? address : "输入 IPv4 地址");
-            strcpy(two, "输入数字和点，再选保存");
+            heading = "局域网地址";
+            strcpy(one, address[0] ? address : "同一 Wi-Fi 可自动查找");
+            strcpy(two, "手动输入数字和点，再选保存");
             break;
         case JOINING:
             heading = "正在连接";
@@ -1078,15 +1083,19 @@ static void input(input_t key, uint32_t now) {
             break;
         }
         case ADDRESS:
-            if (cursor <= 10) {
+            if (cursor == ADDRESS_AUTO) {
+                cmd.action = NET_IP;
+                cmd.value.ip.port = 80;
+                if (send(&cmd)) return_connections(3);
+            } else if (cursor <= ADDRESS_DOT) {
                 size_t n = strlen(address);
                 if (n < sizeof address - 1) {
-                    address[n] = cursor == 10 ? '.' : '0' + (int)cursor;
+                    address[n] = cursor == ADDRESS_DOT ? '.' : '0' + (int)cursor - ADDRESS_ZERO;
                     address[n + 1] = '\0';
                 }
-            } else if (cursor == 11) erase_char(address);
-            else if (cursor == 12) address[0] = '\0';
-            else if (cursor == 14) return_connections(3);
+            } else if (cursor == ADDRESS_DELETE) erase_char(address);
+            else if (cursor == ADDRESS_CLEAR) address[0] = '\0';
+            else if (cursor == ADDRESS_BACK) return_connections(3);
             else if (!snake_lan_ip_valid(address)) error_text = "请输入有效的局域网地址";
             else {
                 cmd.action = NET_IP;

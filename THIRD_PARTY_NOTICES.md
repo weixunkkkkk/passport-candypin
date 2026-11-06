@@ -23,10 +23,12 @@ BSP 的修改集中在屏幕休眠。复用已有 ST7789 与背光支持，新�
 | [espressif/button](https://components.espressif.com/components/espressif/button/versions/4.2.0) | 4.2.0 | 上游 BSP 的 ADC 按键与长短按事件 | Apache-2.0 |
 | [espressif/esp_codec_dev](https://components.espressif.com/components/espressif/esp_codec_dev/versions/1.6.2) | 1.6.2 | 上游 BSP 的音频编解码依赖 | Apache-2.0 |
 | [espressif/cmake_utilities](https://components.espressif.com/components/espressif/cmake_utilities/versions/1.1.1) | 1.1.1 | 组件带入的构建依赖 | Apache-2.0 |
+| [espressif/mdns](https://components.espressif.com/components/espressif/mdns/versions/1.14.1) | 1.14.1 | 在已连接的局域网上发现兼容的小电拼 CP-02S | Apache-2.0 |
 
 ## 设备接口与玩法参考
 
 - **制糖工厂 AI 小电拼**提供功率数据接口。这里的 [客户端](main/snake_fetch.c) 读取局域网 `/metrics.json`，或按 MCP 的 HTTP 传输约定调用 `get_port_details`。设备端接口由对应的小电拼或 MCP 服务提供。[制糖工厂应用](https://apps.apple.com/cn/app/id6743526385) · [MCP 传输规范](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
+- **CoCanMirror Passport**提供手机连接热点后打开配网页的交互参考。[参考配网流程](https://github.com/Kiiiiro/CoCanMirror-passport/blob/main/main/provisioning.c) · [CandyPin 热点服务](main/snake_portal.c)
 - **玩法参考**。充电蛇参考经典 Snake，跳砖吃币参考《超级马力欧》式顶砖与越障，叠方块参考 Tetris 的下落消行，迷宫吃豆参考 Pac-Man，星舰防线参考 Space Invaders。此仓库的角色和背景用代码绘制，地图和规则由本项目实现。演示图使用模拟功率和示例像素画。[游戏实现](main/snake_games.c) · [场景绘制](main/snake_arcade.c)
 - **本项目新增**。五口功率采集与换源、功率动画和接力演示、五款游戏、设备端设置、热点上传页、浏览器内像素转换、三画位存储和拼接动画。入口在 [应用代码](main/snake_app.c)，网络和上传分别在 [网络模块](main/snake_net.c) 与 [热点服务](main/snake_portal.c)。
 

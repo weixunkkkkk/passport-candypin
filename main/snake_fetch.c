@@ -151,6 +151,17 @@ static int post(const char *json) {
 }
 
 static bool initialize_mcp(const char *url) {
+    // The CoCan app can provide the older /sse URL. Its /mcp sibling is
+    // Streamable HTTP. Leave other providers and explicitly configured URLs as entered.
+    static const char official[] = "https://mcp.thecandysign.com/";
+    char endpoint[SNAKE_MCP_URL_MAX];
+    size_t length = strlen(url);
+    if (length >= sizeof official + 4 && length < sizeof endpoint &&
+        !strncmp(url, official, sizeof official - 1) && !strcmp(url + length - 4, "/sse")) {
+        memcpy(endpoint, url, length - 4);
+        memcpy(endpoint + length - 4, "/mcp", 5);
+        url = endpoint;
+    }
     const esp_http_client_config_t config = {.url = url, .timeout_ms = 2800, .disable_auto_redirect = true,
         .crt_bundle_attach = esp_crt_bundle_attach, .event_handler = receive_http,
         .buffer_size = 1536, .buffer_size_tx = 1024, .keep_alive_enable = true};

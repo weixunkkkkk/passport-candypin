@@ -1,18 +1,23 @@
 #include "snake_portal.h"
 #include "snake_net.h"
 #include "snake_album.h"
+#include "snake_setup_dns.h"
 
 #include "esp_http_server.h"
+#include "esp_log.h"
+#include "esp_netif_net_stack.h"
 #include "esp_random.h"
 #include "lwip/sockets.h"
+#include "lwip/udp.h"
 #include <stdio.h>
 #include <string.h>
 
 static httpd_handle_t server;
+static struct udp_pcb *setup_dns; // Owned by the lwIP thread.
 static char token[17];
 extern const char diy_html[] asm("_binary_snake_diy_portal_html_start");
 
-static bool local_request(httpd_req_t *req) {
+static bool hotspot_request(httpd_req_t *req) {
     struct sockaddr_storage local = {0};
     socklen_t size = sizeof local;
     if (getsockname(httpd_req_to_sockfd(req), (struct sockaddr *)&local, &size) != 0) return false;
@@ -28,10 +33,18 @@ static bool local_request(httpd_req_t *req) {
         on_hotspot = !memcmp(ipv6->sin6_addr.s6_addr, mapped, sizeof mapped);
     }
 #endif
-    if (!on_hotspot) return false;
-    char host[32], origin[40];
-    if (httpd_req_get_hdr_value_str(req, "Host", host, sizeof host) != ESP_OK ||
-        (strcmp(host, "192.168.4.1") && strcmp(host, "192.168.4.1:80"))) return false;
+    return on_hotspot;
+}
+
+static bool portal_host(httpd_req_t *req) {
+    char host[32];
+    return httpd_req_get_hdr_value_str(req, "Host", host, sizeof host) == ESP_OK &&
+        (!strcmp(host, "192.168.4.1") || !strcmp(host, "192.168.4.1:80"));
+}
+
+static bool local_request(httpd_req_t *req) {
+    if (!hotspot_request(req) || !portal_host(req)) return false;
+    char origin[40];
     if (httpd_req_get_hdr_value_len(req, "Origin") &&
         (httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof origin) != ESP_OK ||
          (strcmp(origin, "http://192.168.4.1") && strcmp(origin, "http://192.168.4.1:80")))) return false;
@@ -43,6 +56,17 @@ static esp_err_t message(httpd_req_t *req, const char *status, const char *text)
     httpd_resp_set_type(req, "text/plain; charset=utf-8");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     return httpd_resp_sendstr(req, text);
+}
+
+static esp_err_t open_portal(httpd_req_t *req) {
+    httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
+    return message(req, "302 Found", "正在打开 CandyPin 配网");
+}
+
+static esp_err_t captive_probe(httpd_req_t *req, httpd_err_code_t code) {
+    (void)code;
+    if (req->method == HTTP_GET && hotspot_request(req)) return open_portal(req);
+    return message(req, "404 Not Found", "未找到页面。");
 }
 
 static esp_err_t retry_page(httpd_req_t *req) {
@@ -87,6 +111,7 @@ static const char page_head[] =
     "<h1>CandyPin 连接设置</h1><p><a style=\"color:#ffc444\" href=/diy>DIY 像素画上传</a></p>";
 
 static esp_err_t show(httpd_req_t *req) {
+    if (hotspot_request(req) && !portal_host(req)) return open_portal(req);
     if (!local_request(req)) return message(req, "403 Forbidden", "请连接 Passport 的配网热点。");
     snake_net_view_t view;
     if (!snake_net_view(&view) || !view.setup) return message(req, "503 Service Unavailable", "配网页正在启动。");
@@ -101,14 +126,16 @@ static esp_err_t show(httpd_req_t *req) {
         view.note == NET_NOTE_SAVE_FAILED ? "保存失败，请重试。" :
         view.scanning ? "正在扫描 Wi-Fi…" :
         view.note == NET_NOTE_SCAN_FAILED ? "扫描失败，可以重新扫描。" :
-        "选择与小电拼同网的 2.4 GHz Wi-Fi。";
+        view.mode == MODE_MCP ? "选择 2.4 GHz Wi-Fi，并配置小电拼 MCP 地址。" :
+        view.lan_ip[0] ? "选择与小电拼同网的 2.4 GHz Wi-Fi。" :
+        "选择与小电拼同网的 2.4 GHz Wi-Fi，CandyPin 会自动查找小电拼。";
     char item[320];
     snprintf(item, sizeof item, "<p>%s</p>", status);
     if (httpd_resp_sendstr_chunk(req, item) != ESP_OK) return ESP_FAIL;
-    if (!view.setup_joined && view.wifi != WIFI_CONNECTING) {
+    if (!view.setup_joined && view.wifi != WIFI_CONNECTING && !view.scanning) {
         snprintf(item, sizeof item, "<form method=post action=/setup><input type=hidden name=token value=\"%s\">"
             "<label for=ssid>Wi-Fi</label><select id=ssid name=ssid>"
-            "<option value=\"\">保持当前 Wi-Fi</option>", token);
+            "<option value=\"\">%s</option>", token, view.saved_wifi ? "保持当前 Wi-Fi" : "请选择 Wi-Fi");
         if (httpd_resp_sendstr_chunk(req, item) != ESP_OK) return ESP_FAIL;
         for (unsigned i = 0; i < view.ap_count; ++i) {
             const snake_ap_t *ap = &view.ap[i];
@@ -122,11 +149,11 @@ static esp_err_t show(httpd_req_t *req) {
         }
         if (httpd_resp_sendstr_chunk(req,
             "</select><label for=wifi>Wi-Fi 密码</label><input id=wifi name=wifi type=password maxlength=64 "
-            "autocomplete=new-password placeholder=\"开放网络留空\"><label for=mcp>MCP 地址</label>"
+            "autocomplete=new-password placeholder=\"开放网络留空\"><label for=mcp>小电拼 MCP 地址（选填）</label>"
             "<input id=mcp name=mcp type=password maxlength=255 autocomplete=new-password "
             "placeholder=\"https://…\"><p class=muted>") != ESP_OK) return ESP_FAIL;
         if (httpd_resp_sendstr_chunk(req, view.mcp_set ? "MCP 已配置。留空保留现有地址。" :
-                                    "MCP 可选，也可只保存 MCP 地址。") != ESP_OK) return ESP_FAIL;
+                                    "从小电拼 App 的 AI 接入页复制。只用局域网时留空。") != ESP_OK) return ESP_FAIL;
         snprintf(item, sizeof item, "</p><button type=submit>保存并连接</button></form>"
             "<form method=post action=/scan><input type=hidden name=token value=\"%s\">"
             "<button type=submit>重新扫描 Wi-Fi</button></form>", token);
@@ -270,7 +297,48 @@ static esp_err_t save_diy(httpd_req_t *req) {
     return message(req, "200 OK", "已保存。在 Passport 上长按 OK 关闭热点，就能看像素画。");
 }
 
-bool snake_portal_start(void) {
+static void answer_dns(void *context, struct udp_pcb *pcb, struct pbuf *query, const ip_addr_t *from, u16_t port) {
+    (void)context;
+    static uint8_t packet[SNAKE_SETUP_DNS_CAPACITY];
+    u16_t length = pbuf_copy_partial(query, packet, sizeof packet, 0);
+    size_t response = snake_setup_dns_reply(packet, length);
+    if (response) {
+        struct pbuf *reply = pbuf_alloc(PBUF_TRANSPORT, (u16_t)response, PBUF_RAM);
+        if (reply) {
+            if (pbuf_take(reply, packet, (u16_t)response) == ERR_OK) (void)udp_sendto(pcb, reply, from, port);
+            pbuf_free(reply);
+        }
+    }
+    pbuf_free(query);
+}
+
+static esp_err_t start_dns(void *context) {
+    struct netif *ap = esp_netif_get_netif_impl(context);
+    if (!ap) return ESP_FAIL;
+    ip_addr_t address;
+    IP_ADDR4(&address, 192, 168, 4, 1);
+    struct udp_pcb *pcb = udp_new_ip_type(IPADDR_TYPE_V4);
+    if (!pcb) return ESP_ERR_NO_MEM;
+    if (udp_bind(pcb, &address, 53) != ERR_OK) {
+        udp_remove(pcb);
+        return ESP_FAIL;
+    }
+    udp_bind_netif(pcb, ap);
+    udp_recv(pcb, answer_dns, NULL);
+    setup_dns = pcb;
+    return ESP_OK;
+}
+
+static esp_err_t stop_dns(void *context) {
+    (void)context;
+    if (setup_dns) {
+        udp_remove(setup_dns);
+        setup_dns = NULL;
+    }
+    return ESP_OK;
+}
+
+bool snake_portal_start(esp_netif_t *ap) {
     if (server) return true;
     snprintf(token, sizeof token, "%08lx%08lx", (unsigned long)esp_random(), (unsigned long)esp_random());
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
@@ -294,10 +362,16 @@ bool snake_portal_start(void) {
             return false;
         }
     }
+    if (httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, captive_probe) != ESP_OK ||
+        esp_netif_tcpip_exec(start_dns, ap) != ESP_OK)
+        ESP_LOGW("snake-portal", "Automatic setup page unavailable; use 192.168.4.1");
     return true;
 }
 
 void snake_portal_stop(void) {
-    if (server && httpd_stop(server) == ESP_OK) server = NULL;
+    if (server) {
+        (void)esp_netif_tcpip_exec(stop_dns, NULL);
+        if (httpd_stop(server) == ESP_OK) server = NULL;
+    }
     if (!server) explicit_bzero(token, sizeof token);
 }

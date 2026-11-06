@@ -43,3 +43,9 @@ CONFIG_MBEDTLS_HAVE_TIME_DATE=y
 CONFIG_MBEDTLS_SSL_PROTO_DTLS=n
 CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
+
+# CandyPin only queries mDNS on the connected station network.
+# CONFIG_MDNS_ENABLE_BROWSE is not set
+# CONFIG_MDNS_PREDEF_NETIF_AP is not set
+# Advertise the setup hotspot's own IPv4 address as DNS to its client.
+CONFIG_LWIP_DHCPS_ADD_DNS=y
