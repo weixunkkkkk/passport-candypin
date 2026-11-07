@@ -49,3 +49,8 @@ CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
 # CONFIG_MDNS_PREDEF_NETIF_AP is not set
 # Advertise the setup hotspot's own IPv4 address as DNS to its client.
 CONFIG_LWIP_DHCPS_ADD_DNS=y
+
+# Sleep between work and keep USB available while connected to a computer.
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y

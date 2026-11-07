@@ -27,6 +27,7 @@ typedef struct {
     bool saved_wifi;
     bool setup;
     bool setup_joined;
+    bool suspended;
     char setup_ssid[33];
     char ssid[33];
     char lan_ip[16];
@@ -53,5 +54,6 @@ bool snake_net_start(void);
 bool snake_net_send(const snake_net_cmd_t *command);
 bool snake_net_view(snake_net_view_t *view);
 bool snake_net_latest(snake_sample_t *sample);
+void snake_net_screen_off(bool off);
 bool snake_lan_ip_valid(const char *ip);
 bool snake_mcp_url_valid(const char *url);

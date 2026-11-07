@@ -43,9 +43,11 @@ static bool read_options(const char *input, snake_prefs_t *prefs) {
     }
     if (values[0] >= STYLE_COUNT || values[1] > BRIGHT_MAX || values[2] > SLEEP_MAX_SECONDS ||
         values[3] > SAMPLE_MAX_SECONDS || values[4] > SAMPLE_MAX_SECONDS) return false;
+    snake_net_view_t current;
+    uint16_t standby = snake_net_view(&current) ? current.prefs.standby : STANDBY_SAVE;
     *prefs = (snake_prefs_t){.style = (uint8_t)values[0], .brightness = (uint8_t)values[1],
         .sleep_seconds = (uint16_t)values[2], .lan_seconds = (uint8_t)values[3],
-        .mcp_seconds = (uint8_t)values[4]};
+        .mcp_seconds = (uint8_t)values[4], .standby = standby};
     return snake_prefs_valid(prefs);
 }
 
@@ -64,9 +66,9 @@ static void command(char *line) {
         snake_net_view_t view;
         char out[120];
         if (!snake_net_view(&view)) { reply("PS ERR unavailable\n"); return; }
-        snprintf(out, sizeof out, "PS NET wifi=%u mode=%u source=%u mcp=%u lan=%u saved=%u note=%u setup=%u aps=%u\n",
+        snprintf(out, sizeof out, "PS NET wifi=%u mode=%u source=%u mcp=%u lan=%u saved=%u note=%u setup=%u aps=%u suspended=%u\n",
             view.wifi, view.mode, view.source, view.mcp_set, view.lan_ip[0] != '\0', view.saved_wifi,
-            view.note, view.setup, view.ap_count);
+            view.note, view.setup, view.ap_count, view.suspended);
         reply(out);
         return;
     }
@@ -76,9 +78,9 @@ static void command(char *line) {
         if (!snake_net_view(&view)) { reply("PS ERR unavailable\n"); return; }
         snake_sample_t sample;
         bool has_sample = snake_net_latest(&sample);
-        snprintf(out, sizeof out, "PS OPTIONS style=%u brightness=%u sleep=%u lan=%u mcp=%u sample_at=%lu\n",
+        snprintf(out, sizeof out, "PS OPTIONS style=%u brightness=%u sleep=%u lan=%u mcp=%u sample_at=%lu standby=%u\n",
             view.prefs.style, view.prefs.brightness, view.prefs.sleep_seconds, view.prefs.lan_seconds,
-            view.prefs.mcp_seconds, has_sample ? (unsigned long)sample.at : 0ul);
+            view.prefs.mcp_seconds, has_sample ? (unsigned long)sample.at : 0ul, view.prefs.standby);
         reply(out);
         return;
     }
@@ -161,7 +163,7 @@ static void worker(void *unused) {
     bool over = false;
     for (;;) {
         uint8_t c;
-        if (usb_serial_jtag_read_bytes(&c, 1, pdMS_TO_TICKS(100)) != 1) continue;
+        if (usb_serial_jtag_read_bytes(&c, 1, pdMS_TO_TICKS(1000)) != 1) continue;
         if (c == '\r') continue;
         if (c == '\n') {
             if (!over) {

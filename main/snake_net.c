@@ -42,6 +42,7 @@ static uint32_t cloud_at;
 static uint32_t discovery_at;
 static target_t discovered_lan;
 static bool mdns_ready;
+static bool screen_off;
 static uint32_t setup_deadline;
 static esp_netif_t *station_netif;
 static esp_netif_t *setup_netif;
@@ -102,8 +103,10 @@ static void read_settings(void) {
     if (!read_blob(nvs, "mcp", mcp_url, sizeof mcp_url) || !snake_mcp_url_valid(mcp_url))
         explicit_bzero(mcp_url, sizeof mcp_url);
     view.mcp_set = mcp_url[0] != '\0';
-    snake_prefs_t prefs;
-    if (read_blob(nvs, "prefs", &prefs, sizeof prefs) && snake_prefs_valid(&prefs)) view.prefs = prefs;
+    uint8_t bytes[sizeof(snake_prefs_t)];
+    size_t size = sizeof bytes;
+    if (nvs_get_blob(nvs, "prefs", bytes, &size) == ESP_OK)
+        (void)snake_prefs_decode(bytes, size, &view.prefs);
     nvs_close(nvs);
 }
 
@@ -140,7 +143,9 @@ static bool radio_init(void) {
         nvs_close(nvs);
     }
     view.saved_wifi = saved_sta.sta.ssid[0] != '\0';
-    return esp_wifi_start() == ESP_OK;
+    if (esp_wifi_start() != ESP_OK) return false;
+    (void)esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+    return true;
 }
 
 static void online_status(bool online) {
@@ -510,11 +515,33 @@ static void worker(void *unused) {
     if (radio && !view.saved_wifi) start_setup();
     for (;;) {
         snake_net_cmd_t cmd;
-        if (xQueueReceive(commands, &cmd, pdMS_TO_TICKS(100)) == pdTRUE) {
+        bool has_command = xQueueReceive(commands, &cmd, pdMS_TO_TICKS(view.suspended ? 500 : 100)) == pdTRUE;
+        bool suspend = __atomic_load_n(&screen_off, __ATOMIC_RELAXED) &&
+            view.prefs.standby == STANDBY_SAVE && !view.setup;
+        if (suspend != view.suspended) {
+            esp_err_t changed = ESP_OK;
+            if (suspend) {
+                snake_close_mcp();
+                if (mdns_ready) { mdns_free(); mdns_ready = false; }
+                if (radio) changed = esp_wifi_stop();
+                if (changed == ESP_ERR_WIFI_NOT_STARTED) changed = ESP_OK;
+                xEventGroupClearBits(wifi_events, HAS_IP);
+                online_status(false);
+            } else {
+                if (radio) changed = esp_wifi_start();
+                reconnect_at = now_ms();
+            }
+            if (changed == ESP_OK) {
+                view.suspended = suspend;
+                ESP_LOGI(TAG, "Screen standby network %s", suspend ? "stopped" : "resumed");
+                publish();
+            }
+        }
+        if (has_command) {
             command(&cmd, radio);
             explicit_bzero(&cmd, sizeof cmd);
         }
-        if (!radio) continue;
+        if (!radio || view.suspended) continue;
         bool ip = !paused && (xEventGroupGetBits(wifi_events) & HAS_IP);
         online_status(ip);
         uint32_t now = now_ms();
@@ -545,4 +572,8 @@ bool snake_net_view(snake_net_view_t *out) {
 }
 bool snake_net_latest(snake_sample_t *sample) {
     return sample_queue && xQueuePeek(sample_queue, sample, 0) == pdTRUE;
+}
+
+void snake_net_screen_off(bool off) {
+    __atomic_store_n(&screen_off, off, __ATOMIC_RELAXED);
 }

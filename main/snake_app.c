@@ -3,10 +3,14 @@
 #include "snake_arcade.h"
 #include "snake_art.h"
 #include "snake_net.h"
+#include "snake_power.h"
+#include "key_guard.h"
 
 #include "bsp_battery.h"
 #include "bsp_button.h"
 #include "bsp_display.h"
+#include "bsp_pins.h"
+#include "esp_sleep.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -39,7 +43,7 @@ static const char *const category_names[] = {"联网与读数", "屏幕与休眠
 static const char *const connection_names[] = {"数据来源", "扫描 Wi-Fi", "热点设置", "局域网地址", "采样频率"};
 static const char *const demo_names[] = {"插拔与功率变化", "60 W 功率接力"};
 static const char *const maze_names[ARCADE_MAZES] = {"糖霜花园", "薄荷回廊", "莓果仓库"};
-static const char *const pref_names[] = {"屏幕亮度", "息屏时间", "局域网采样", "MCP 采样"};
+static const char *const pref_names[] = {"屏幕亮度", "息屏时间", "局域网采样", "MCP 采样", "息屏策略"};
 static const uint16_t sleep_choices[] = {0, 15, 30, 60, 120, 180, 300, 600, 1800};
 static const char *const alphabets[] = {"abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
     "0123456789", " !\"#$%&'()*+,-./:;<=>?@[\\]^_" "\x60" "{|}~"};
@@ -70,6 +74,7 @@ static snake_prefs_t prefs, edit;
 static bool prefs_pending;
 static unsigned editing;
 static bool screen_dark;
+static key_guard_t wake_key;
 static uint32_t last_input, last_motion, idle_since, art_phase;
 static uint32_t card_now, shown_round_age;
 static int battery_pct = -1;
@@ -322,7 +327,8 @@ static unsigned options(void) {
         case ADDRESS: return ADDRESS_COUNT;
         case HOTSPOT: return 3;
         case STYLES: return STYLE_COUNT;
-        case PREFS: case SAMPLING: return 2;
+        case PREFS: return 3;
+        case SAMPLING: return 2;
         default: return 0;
     }
 }
@@ -337,7 +343,8 @@ static void pref_value(char value[24], const snake_prefs_t *settings, unsigned f
             else snprintf(value, 24, "%u 秒", (unsigned)settings->sleep_seconds);
             break;
         case 2: snprintf(value, 24, "%u 秒", (unsigned)settings->lan_seconds); break;
-        default: snprintf(value, 24, "%u 秒", (unsigned)settings->mcp_seconds); break;
+        case 3: snprintf(value, 24, "%u 秒", (unsigned)settings->mcp_seconds); break;
+        default: strcpy(value, settings->standby == STANDBY_SAVE ? "省电休眠" : "持续采样"); break;
     }
 }
 
@@ -382,7 +389,8 @@ static void option_text(char buf[80], unsigned i) {
                         net.setup_joined ? "Wi-Fi 已连接" : "选 Wi-Fi 或填写 MCP 地址");
             break;
         case STYLES: snprintf(buf, 80, "%s%s", style_names[i], i == prefs.style ? "  · 已选" : ""); break;
-        case PREFS: case SAMPLING: strcpy(buf, pref_names[i + (page == SAMPLING ? 2u : 0u)]); break;
+        case PREFS: strcpy(buf, pref_names[i == 2 ? 4 : i]); break;
+        case SAMPLING: strcpy(buf, pref_names[i + 2u]); break;
         default: buf[0] = '\0'; break;
     }
 }
@@ -469,7 +477,7 @@ static void paint_settings(void) {
         case PREFS:
             heading = "屏幕与休眠";
             strcpy(one, "息屏关闭液晶和背光");
-            strcpy(two, "任意键唤醒 · 后台继续读数");
+            strcpy(two, prefs.standby == STANDBY_SAVE ? "息屏停联网 · 1 分钟后休眠" : "息屏保持联网与采样");
             break;
         case SAMPLING:
             heading = "采样频率";
@@ -478,7 +486,8 @@ static void paint_settings(void) {
         case ADJUST:
             heading = pref_names[editing];
             hint = "上下调 · OK 保存 · 长按 OK 取消";
-            strcpy(one, editing >= 2 ? "长按上下键一次调 5 秒" : "短按上下键调整");
+            strcpy(one, editing == 4 ? "省电休眠后按任意键开机" :
+                editing >= 2 ? "长按上下键一次调 5 秒" : "短按上下键调整");
             break;
         default: break;
     }
@@ -517,7 +526,8 @@ static void paint_settings(void) {
                 unsigned n = sizeof sleep_choices / sizeof sleep_choices[0];
                 while (slot + 1 < n && sleep_choices[slot] < edit.sleep_seconds) ++slot;
                 fill = slot * 154u / (n - 1u);
-            } else {
+            } else if (editing == 4) fill = edit.standby == STANDBY_SAVE ? 1 : 154;
+            else {
                 unsigned seconds = editing == 2 ? edit.lan_seconds : edit.mcp_seconds;
                 fill = seconds * 154u / SAMPLE_MAX_SECONDS;
             }
@@ -535,7 +545,7 @@ static void paint_settings(void) {
             if (root) category_status(str, i);
             else {
                 char value[24];
-                pref_value(value, &prefs, i + (page == SAMPLING ? 2u : 0u));
+                pref_value(value, &prefs, page == SAMPLING ? i + 2u : i == 2 ? 4 : i);
                 snprintf(str, sizeof str, "%s", value);
             }
             text(row_detail[r], str);
@@ -833,6 +843,8 @@ static void adjust_value(int sign, bool fast) {
         int count = sizeof sleep_choices / sizeof sleep_choices[0];
         while (i < count - 1 && sleep_choices[i] < edit.sleep_seconds) ++i;
         edit.sleep_seconds = sleep_choices[clamped(i + sign, 0, count - 1)];
+    } else if (editing == 4) {
+        edit.standby = edit.standby == STANDBY_SAVE ? STANDBY_LIVE : STANDBY_SAVE;
     } else {
         uint8_t *seconds = editing == 2 ? &edit.lan_seconds : &edit.mcp_seconds;
         int minimum = editing == 2 ? LAN_MIN_SECONDS : MCP_MIN_SECONDS;
@@ -960,7 +972,7 @@ static void input(input_t key, uint32_t now) {
         else if (page == ADJUST) {
             bsp_display_backlight(prefs.brightness);
             show_page(adjust_return);
-            cursor = editing % 2u;
+            cursor = editing == 4 ? 2 : editing % 2u;
         }
         else if (page == HOTSPOT) {
             snake_net_cmd_t cmd = {.action = NET_STOP_SETUP};
@@ -1007,7 +1019,7 @@ static void input(input_t key, uint32_t now) {
         else if (key == KEY_DOWN || key == KEY_DOWN_FAST) adjust_value(-1, fast);
         else if (key == KEY_OK && store_prefs(&edit)) {
             show_page(adjust_return);
-            cursor = editing % 2u;
+            cursor = editing == 4 ? 2 : editing % 2u;
         }
         return;
     }
@@ -1053,7 +1065,7 @@ static void input(input_t key, uint32_t now) {
             break;
         case PREFS: case SAMPLING:
             adjust_return = page;
-            editing = cursor + (page == SAMPLING ? 2u : 0u);
+            editing = page == SAMPLING ? cursor + 2u : cursor == 2 ? 4 : cursor;
             edit = prefs;
             show_page(ADJUST);
             break;
@@ -1114,6 +1126,13 @@ bool snake_app_press(input_t key) {
 
 static void button(bsp_btn_t key, bsp_btn_ev_t event, void *unused) {
     (void)unused;
+    static bool discard_wake[BSP_BTN_OK + 1];
+    if (key_guard_consume(&wake_key, event == BSP_BTN_RELEASE, esp_timer_get_time())) {
+        discard_wake[key] = true;
+        return;
+    }
+    if (event == BSP_BTN_PRESS) discard_wake[key] = false;
+    if (discard_wake[key]) return;
     static struct { bool fast, held; } gesture[BSP_BTN_OK + 1];
     static const input_t short_keys[] = {KEY_UP, KEY_DOWN, KEY_OK};
     static const input_t long_keys[] = {KEY_UP_FAST, KEY_DOWN_FAST, KEY_BACK};
@@ -1177,6 +1196,7 @@ static void tick(lv_timer_t *timer) {
     if (previous == ARCADE_PLAYING && game.phase == ARCADE_RESULT) last_input = now;
     if (!screen_dark && page != HOTSPOT && game.phase != ARCADE_PLAYING && prefs.sleep_seconds &&
         now - last_input >= (uint32_t)prefs.sleep_seconds * 1000u) display_sleep(true, now);
+    snake_power_screen_off(screen_dark);
     __atomic_store_n(&fast_card_input, !screen_dark && page == CARD, __ATOMIC_RELAXED);
     if (was_dark != screen_dark) lv_timer_set_period(timer, screen_dark ? 160 : 40);
     if (screen_dark) return;
@@ -1231,15 +1251,25 @@ void app_main(void) {
         bsp_lvgl_unlock();
     } else return;
     bsp_display_backlight(prefs.brightness);
+    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO)
+        key_guard_arm(&wake_key, esp_timer_get_time(), 1500000);
     if (bsp_button_init(button, NULL) != ESP_OK) ESP_LOGE("candypin", "Button initialization failed");
+    key_guard_sync_released(&wake_key, bsp_button_read_mv() >= BSP_BTN_MV_RELEASED_MIN);
+    snake_power_init();
     if (nvs == ESP_OK) snake_album_init();
     if (nvs == ESP_OK && !snake_net_start()) ESP_LOGE("candypin", "Network task could not start");
     if (nvs != ESP_OK) ESP_LOGE("candypin", "Settings unavailable: %s", esp_err_to_name(nvs));
     snake_usb_start();
     ESP_LOGI("candypin", "240x320 card ready, heap=%u", (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
-    if (bsp_battery_init() != ESP_OK) return;
+    bool battery_ready = bsp_battery_init() == ESP_OK;
+    uint32_t battery_at = 0;
     for (;;) {
-        __atomic_store_n(&battery_pct, bsp_battery_soc(), __ATOMIC_RELAXED);
-        vTaskDelay(pdMS_TO_TICKS(30000));
+        uint32_t now = now_ms();
+        if (battery_ready && (int32_t)(now - battery_at) >= 0) {
+            __atomic_store_n(&battery_pct, bsp_battery_soc(), __ATOMIC_RELAXED);
+            battery_at = now + 30000;
+        }
+        snake_power_poll();
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
